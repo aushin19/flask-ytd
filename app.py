@@ -1,5 +1,5 @@
 import os
-
+import base64
 from flask import Flask, request, render_template, url_for
 from yt_dlp import YoutubeDL
 import logging
@@ -46,16 +46,46 @@ def index():
                 'no_warnings': True,
             }
 
+            # Retrieve and decode the Base64-encoded cookies
+            encoded_cookies = os.getenv('YT_DL_COOKIES')
+            if encoded_cookies:
+                try:
+                    decoded_cookies = base64.b64decode(encoded_cookies).decode('utf-8')
+                except base64.binascii.Error as e:
+                    error = "Invalid cookie encoding."
+                    logging.error(f"Base64 decoding error: {e}")
+                    return render_template('index.html', link=link, error=error)
+                except UnicodeDecodeError as e:
+                    error = "Cookies contain invalid UTF-8 characters."
+                    logging.error(f"UTF-8 decoding error: {e}")
+                    return render_template('index.html', link=link, error=error)
+
+                # Write the decoded cookies to a temporary file
+                with open('cookies.txt', 'w', encoding='utf-8') as f:
+                    f.write(decoded_cookies)
+                ydl_opts['cookiefile'] = 'cookies.txt'
+            else:
+                logging.warning("YT_DL_COOKIES environment variable not set.")
+                error = "Server configuration error. Please contact the administrator."
+                return render_template('index.html', link=link, error=error)
+
             with YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(video_url, download=True)
                 filename = ydl.prepare_filename(info_dict)
                 base, ext = os.path.splitext(filename)
                 new_file = base + '.mp3'
                 link = url_for('static', filename='downloads/' + os.path.basename(new_file))
+
+            # Clean up the temporary cookies file
+            if os.path.exists('cookies.txt'):
+                os.remove('cookies.txt')
+
         except Exception as e:
             error = f"An error occurred: {e}"
             logging.error(f"Error processing video URL {video_url}: {traceback.format_exc()}")
+
     return render_template('index.html', link=link, error=error)
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    # Removed app.run() as Render uses Gunicorn
+    pass
